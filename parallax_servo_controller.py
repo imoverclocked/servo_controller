@@ -73,20 +73,85 @@ class ServoScriptHandler:
     def __init__(self, servo_controller):
         self.servo_controller = servo_controller
         self.commands = {
-            'defaults': self.cmd_defaults,
-            'nop':      self.cmd_nop,
-            'set':      self.cmd_set,
-            'sleep':    self.cmd_sleep,
+            'chan_alias': self.cmd_chan_alias,
+            'chan_range': self.cmd_chan_range,
+            'defaults':   self.cmd_defaults,
+            'echo':       self.cmd_echo,
+            '#':          self.cmd_nop,
+            'nop':        self.cmd_nop,
+            'pos':        self.cmd_pos,
+            'set':        self.cmd_set,
+            'sleep':      self.cmd_sleep,
         }
+        # We can alias names to specific channels
+        self.__channel_aliases = {}
+        # We have the default range for each servo (320-1180)
+        # but some servos and some setups need that range to be tweaked for
+        # optimal positioning
+        self.__channel_ranges = {}
+        # Watch to see what commands we are getting
+        self.__verbose = False
 
     def parse(self, command):
         if len(command) > 0:
+            if len(command) <= 1:
+                return True
+
             pieces = command.split()
-            cmd = self.commands[pieces[0]]
-            if cmd:
+            if pieces[0][0] == '#':
+                pieces[0] = '#'
+
+            if self.__verbose:
+                print command,
+
+            try:
+                cmd = self.commands[pieces[0]]
+            except:
+                self.warn("unrecognized command: %s" % pieces[0])
+                cmd = self.commands['nop']
+
+            try:
                 cmd( pieces )
+            except:
+                self.warn("Error while executing command: %s" % (command))
+                raise
+
             return True
         return False
+
+    def warn(self, mesg):
+        print "Warning: %s" % (mesg)
+
+    def chan_alias(self, chan_name, chan=None):
+        ''' get/set the channel for an alias '''
+        if chan != None:
+            self.__channel_aliases[ chan_name ] = chan
+        try:
+            return self.__channel_aliases[ chan_name ]
+        except:
+            return None
+
+    def chan_range(self, chan_name, range=None):
+        ''' get/set the range for a channel '''
+        if range != None:
+            self.__channel_ranges[ chan_name ] = range
+        try:
+            return self.__channel_ranges[ chan_name ]
+        except:
+            return [ 320, 1180, 750 ]
+
+    def cmd_chan_alias(self, args):
+        '''chan_alias <alias> <chan>
+           sets a name to easily reference a channel
+        '''
+        self.chan_alias( args[1], int(args[2]))
+
+    def cmd_chan_range(self, args):
+        '''chan_range <alias> <min> <max> <default>
+           sets a range beyond the default for a chan_alias
+           the default range is 320 1180 750
+        '''
+        self.chan_range( args[1], [ int(args[2]), int(args[3]), int(args[4]) ] )
 
     def cmd_defaults(self, args):
         '''defaults
@@ -98,17 +163,42 @@ class ServoScriptHandler:
             position = 750
             self.servo_controller.position( chan, ramp, position )
 
+    def cmd_echo(self, args):
+        '''echo [args]
+           send a string to stdout
+        '''
+        args.pop(0)
+        print " ".join(args)
+
     def cmd_nop(self, args):
         '''nop ...'''
         pass
 
-    def cmd_set(self, args):
-        '''set <chan> <ramp> <position>
+    def cmd_pos(self, args):
+        '''pos <chan> <ramp> <position>
            approx command time: 14.6 ms - 16.2 ms
         '''
-        position = int(args[3])
+
+        try:
+            chan = int(args[1])
+            chan_range = [ 320, 1180, 750 ]
+        except ValueError:
+            chan_name = args[1]
+            chan = self.chan_alias( chan_name )
+            chan_range = self.chan_range( chan_name )
+
         ramp = int(args[2])
-        chan = int(args[1])
+
+        try:
+            position_float = float(args[3])
+            position = (chan_range[1] - chan_range[0])*position_float
+            position = int( position ) + chan_range[0]
+        except ValueError:
+            if args[3] == 'default':
+                position = chan_range[2]
+            else:
+                raise
+
         self.servo_controller.position( chan, ramp, position )
 
     def cmd_sleep(self, args):
@@ -118,18 +208,31 @@ class ServoScriptHandler:
         delay = float(args[1])
         time.sleep(delay)
 
+    def cmd_set(self, args):
+        '''set <var> <value>
+           set some variable name to some value
+           eg: set verbose True
+        '''
+        var = args[1]
+        value = args[2]
+        if var == 'verbose':
+            if value == 'True':
+                self.__verbose = True
+            else:
+                self.__verbose = False
+
 def main():
     import optparse
 
     parser = optparse.OptionParser(
-        usage = "%prog [options] [port [baudrate]]",
+        usage = "%prog [options] < script",
         description = "ParallaxServo - A simple terminal program for the serial port."
     )
 
     parser.add_option("-p", "--port",
         dest = "port",
         help = "port, a number (default 0) or a device name (deprecated option)",
-        default = None
+        default = 0
     )
 
     (options, args) = parser.parse_args()
@@ -138,20 +241,8 @@ def main():
     port = options.port
     # Default baud on the Parallax board is 2400
     baudrate = 2400
-    if args:
-        if options.port is not None:
-            parser.error("no arguments are allowed, options only when --port is given")
-        port = args.pop(0)
-        if args:
-            try:
-                baudrate = int(args[0])
-            except ValueError:
-                parser.error("baud rate must be a number, not %r" % args[0])
-            args.pop(0)
-        if args:
-            parser.error("too many arguments")
-    else:
-        if port is None: port = 0
+    # if args:
+    #     script_fn = args.pop(0)
 
     try:
         servo_controller = ParallaxServo(
