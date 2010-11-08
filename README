@@ -1,0 +1,11 @@
+This is more of a toy project so the code is a bit hackish in nature. I am targeting an older
+Parallax board that I've had laying around for a while now. This code basically sends commands
+to the board and will attempt to provide some slightly more abstract mechanisms for controlling
+servos in the future.
+
+I am harnessing the pyserial library for serial port access under python. I've included a tar.bz2
+of the library so you don't have to go search for it if you are feeling lazy like me when I install
+it on my various machines.
+
+Cheers,
+-imoverclocked
